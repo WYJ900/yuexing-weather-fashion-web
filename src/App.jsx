@@ -243,6 +243,12 @@ const defaultWardrobe = [
 ];
 
 const DEFAULT_WARDROBE_VERSION = '2026-04-23-lookbook-v2';
+const demoPreferences = ['温柔', '通勤', '图书馆', '浅色系', '低负担', '舒适鞋'];
+const demoWeatherLocation = {
+  city: '北京',
+  latitude: 39.9042,
+  longitude: 116.4074,
+};
 const defaultPreferences = ['温柔', '浅色系', '约会', '春秋', '轻通勤'];
 const wardrobeTypes = ['上衣', '下装', '外套', '鞋子', '配饰'];
 const wardrobeTypeMeta = {
@@ -259,6 +265,11 @@ const tripSceneOptions = ['上学', '通勤', '约会', '运动', '社团', '面
 const transportOptions = ['步行', '骑行', '公交', '地铁', '打车', '自驾'];
 const colorOptions = ['白色', '黑色', '灰色', '米色', '粉色', '蓝色', '红色', '碎花', '彩色'];
 const seasonOptions = ['春秋', '夏季', '冬季', '四季'];
+const defaultWardrobeMap = defaultWardrobe.reduce((record, item) => {
+  record[item.id] = item;
+  return record;
+}, {});
+
 const quizQuestions = [
   {
     question: '今天你更想呈现哪种状态？',
@@ -303,6 +314,47 @@ const defaultConditions = {
   weatherSource: '默认城市',
   manualWeatherAdjusted: false,
 };
+
+const demoLookHistory = [
+  {
+    id: 'demo-look-1',
+    title: '图书馆轻通勤',
+    savedAt: '2026-04-08T08:10:00+08:00',
+    conditions: {
+      ...defaultConditions,
+      weather: '多云',
+      temp: 22,
+      mood: '专注',
+      scene: '通勤',
+      tripScene: '上学',
+      transport: '地铁',
+      season: '春秋',
+    },
+    tripPlan: {
+      title: '图书馆轻通勤',
+    },
+    pieces: ['seed-knit', 'seed-pants', 'seed-coat', 'seed-loafers', 'seed-bag'],
+  },
+  {
+    id: 'demo-look-2',
+    title: '周末咖啡散步',
+    savedAt: '2026-04-20T15:20:00+08:00',
+    conditions: {
+      ...defaultConditions,
+      weather: '晴天',
+      temp: 25,
+      mood: '温柔',
+      scene: '约会',
+      tripScene: '休闲',
+      transport: '步行',
+      season: '春秋',
+    },
+    tripPlan: {
+      title: '周末咖啡散步',
+    },
+    pieces: ['seed-cami', 'seed-skirt', 'seed-burgundy', 'seed-heels', 'seed-pearl'],
+  },
+];
 
 function getPath() {
   return window.location.pathname || '/';
@@ -474,12 +526,20 @@ function buildRecommendationKey(look, conditions) {
   ].join('|');
 }
 
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatLocalDate(date = new Date()) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
 function getCurrentMonthKey(date = new Date()) {
-  return date.toISOString().slice(0, 7);
+  return formatLocalDate(date).slice(0, 7);
 }
 
 function getCurrentYearKey(date = new Date()) {
-  return date.toISOString().slice(0, 4);
+  return formatLocalDate(date).slice(0, 4);
 }
 
 function countBy(items, getter) {
@@ -791,6 +851,15 @@ function createLookRecord(look, conditions) {
   };
 }
 
+function buildDemoLookHistory() {
+  return demoLookHistory.map((record) => ({
+    ...record,
+    pieces: record.pieces
+      .map((itemId) => defaultWardrobeMap[itemId])
+      .filter(Boolean),
+  }));
+}
+
 function createId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `garment-${Date.now()}`;
@@ -879,6 +948,9 @@ function App() {
     if (!sessionReady) return;
     setStorageReady(false);
     const versionKey = buildScopedStorageKey(storageScope, clientStorageKeys.wardrobeVersion);
+    const tagsKey = buildScopedStorageKey(storageScope, clientStorageKeys.tags);
+    const lookHistoryKey = buildScopedStorageKey(storageScope, clientStorageKeys.lookHistory);
+    const weatherLocationKey = buildScopedStorageKey(storageScope, clientStorageKeys.weatherLocation);
     let nextGarments = readScopedStored(storageScope, clientStorageKeys.wardrobe, defaultWardrobe);
     const version = localStorage.getItem(versionKey);
     if (version !== DEFAULT_WARDROBE_VERSION) {
@@ -887,11 +959,32 @@ function App() {
       localStorage.setItem(versionKey, DEFAULT_WARDROBE_VERSION);
       saveScopedStored(storageScope, clientStorageKeys.wardrobe, nextGarments);
     }
+    const isDemoScope = storageScope === 'demo';
+    const nextTasteTags = readScopedStored(
+      storageScope,
+      clientStorageKeys.tags,
+      isDemoScope ? demoPreferences : defaultPreferences,
+    );
+    const nextLookHistory = readScopedStored(
+      storageScope,
+      clientStorageKeys.lookHistory,
+      isDemoScope ? buildDemoLookHistory() : [],
+    );
+    const nextWeatherLocation = readScopedStored(
+      storageScope,
+      clientStorageKeys.weatherLocation,
+      isDemoScope ? demoWeatherLocation : null,
+    );
+    if (isDemoScope) {
+      if (!localStorage.getItem(tagsKey)) saveScopedStored(storageScope, clientStorageKeys.tags, nextTasteTags);
+      if (!localStorage.getItem(lookHistoryKey)) saveScopedStored(storageScope, clientStorageKeys.lookHistory, nextLookHistory);
+      if (!localStorage.getItem(weatherLocationKey)) saveScopedStored(storageScope, clientStorageKeys.weatherLocation, nextWeatherLocation);
+    }
     setGarments(nextGarments);
-    setTasteTags(readScopedStored(storageScope, clientStorageKeys.tags, defaultPreferences));
+    setTasteTags(nextTasteTags);
     setConditions(readScopedStored(storageScope, clientStorageKeys.conditions, defaultConditions));
-    setLookHistory(readScopedStored(storageScope, clientStorageKeys.lookHistory, []));
-    setWeatherLocation(readScopedStored(storageScope, clientStorageKeys.weatherLocation, null));
+    setLookHistory(nextLookHistory);
+    setWeatherLocation(nextWeatherLocation);
     setAiRecommendation(readScopedStored(storageScope, clientStorageKeys.aiRecommendation, null));
     setAiRuntimeConfig(sanitizeAiRuntimeConfig(readScopedSessionStored(storageScope, clientSessionKeys.aiRuntime, defaultAiRuntimeConfig)));
     if (!isAuthenticated) setJournalEntries([]);
@@ -1081,11 +1174,10 @@ function App() {
 
   const resetDemoData = () => {
     setGarments(defaultWardrobe);
-    setTasteTags(defaultPreferences);
+    setTasteTags(storageScope === 'demo' ? demoPreferences : defaultPreferences);
     setConditions(defaultConditions);
-    setLookHistory([]);
-    setJournalEntries([]);
-    setWeatherLocation(null);
+    setLookHistory(storageScope === 'demo' ? buildDemoLookHistory() : []);
+    setWeatherLocation(storageScope === 'demo' ? demoWeatherLocation : null);
     setAiRecommendation(null);
     localStorage.setItem(buildScopedStorageKey(storageScope, clientStorageKeys.wardrobeVersion), DEFAULT_WARDROBE_VERSION);
   };
@@ -2291,7 +2383,7 @@ function JournalPage({ user, conditions, journalEntries, setJournalEntries, aiRu
   const [draft, setDraft] = useState({
     title: '',
     place: '',
-    tripDate: new Date().toISOString().slice(0, 10),
+    tripDate: formatLocalDate(),
     mood: conditions.mood || '松弛',
     scene: conditions.tripScene || conditions.scene || '休闲',
     transport: conditions.transport || '步行',

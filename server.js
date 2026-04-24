@@ -198,6 +198,18 @@ function createId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatLocalDate(date = new Date()) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function getLocalMonthKey(date = new Date()) {
+  return formatLocalDate(date).slice(0, 7);
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
   const hash = scryptSync(password, salt, 64).toString('hex');
@@ -563,7 +575,9 @@ async function readJson(req) {
 function persistJournalPhoto(photo) {
   const value = String(photo || '').trim();
   if (!value) return '';
-  if (value.startsWith('/uploads/')) return value;
+  if (value.startsWith('/uploads/')) {
+    throw createError(400, 'Please upload a fresh image instead of reusing an existing uploads path.');
+  }
   const match = value.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
   if (!match) throw createError(400, '仅支持 JPG、PNG 或 WebP 图片。');
   const [, mimeType, base64] = match;
@@ -703,6 +717,12 @@ function getJournalEntries(userId) {
     .map(parseRow);
 }
 
+function userOwnsPhotoPath(userId, photoPath) {
+  if (!userId || !photoPath) return false;
+  const entry = db.prepare('SELECT id FROM journal_entries WHERE user_id = ? AND photo = ? LIMIT 1').get(userId, photoPath);
+  return Boolean(entry);
+}
+
 function buildProfileFromEntries(entries) {
   const add = (record, key) => {
     if (!key) return;
@@ -783,7 +803,7 @@ async function createJournal(payload, userId, aiRuntime) {
     user_id: userId,
     title: payload.title || '未命名手记',
     place: payload.place || '未命名地点',
-    trip_date: payload.tripDate || new Date().toISOString().slice(0, 10),
+    trip_date: payload.tripDate || formatLocalDate(),
     weather_snapshot: payload.weatherSnapshot || null,
     mood: payload.mood || '松弛',
     scene: payload.scene || '休闲',
@@ -931,11 +951,16 @@ function serveFrontend(req, res, pathname) {
   return true;
 }
 
-function serveUploads(res, pathname) {
+function serveUploads(req, res, pathname) {
+  const session = requireSession(req);
   const relativePath = pathname.replace(/^\/+/, '');
   const filePath = resolve(DATA_DIR, relativePath);
   if (!filePath.startsWith(resolve(UPLOAD_DIR))) {
     sendJson(res, 403, { ok: false, error: '非法路径。' });
+    return true;
+  }
+  if (!userOwnsPhotoPath(session.user.id, pathname)) {
+    sendJson(res, 404, { ok: false, error: 'Not found' });
     return true;
   }
   if (!existsSync(filePath)) {
@@ -1017,10 +1042,11 @@ const server = http.createServer(async (req, res) => {
         });
       }
       if (req.method === 'GET' && url.pathname === '/api/journal/summary') {
+        const period = url.searchParams.get('period') || 'month';
         return sendJson(res, 200, await getJournalSummary(
           session.user.id,
-          url.searchParams.get('period') || 'month',
-          url.searchParams.get('key') || new Date().toISOString().slice(0, 7),
+          period,
+          url.searchParams.get('key') || (period === 'year' ? formatLocalDate().slice(0, 4) : getLocalMonthKey()),
           aiRuntime,
         ));
       }
@@ -1036,7 +1062,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/uploads/')) {
-      return serveUploads(res, url.pathname);
+      return serveUploads(req, res, url.pathname);
     }
     if (req.method === 'GET' || req.method === 'HEAD') {
       return serveFrontend(req, res, url.pathname);
