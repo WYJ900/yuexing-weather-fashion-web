@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="悦行天气：天气与情绪融合的智能行程助手"
+    />
+    <title>悦行天气 | 智能行程助手</title>
+    <link rel="stylesheet" href="/src/styles.css?direct" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="static-preview" class="static-preview">
+      <div class="transition-layer" id="fallback-transition">
+        <div class="silk-panel"></div>
+        <div class="transition-label">
+          <span>HOME</span>
+          <strong>首页</strong>
+        </div>
+      </div>
+      <nav class="v2-nav">
+        <a class="brand-mark" href="/">
+          <span>悦行天气</span>
+          <small>YX WEATHER</small>
+        </a>
+        <div class="nav-links">
+          <a href="/">首页</a>
+          <a href="/about">作品说明</a>
+        </div>
+        <a class="nav-action" href="/login">登录演示账号</a>
+      </nav>
+
+      <main class="page-stage">
+        <section class="luxury-hero">
+          <div class="hero-copy">
+            <p class="kicker">Weather meets travel memory</p>
+            <h1>悦行天气</h1>
+            <p class="hero-lead">
+              融合真实天气、情绪语义、行程场景、个人衣柜和行程手记记忆的智能行程助手。
+              每一次出门，都会变成下一次推荐的依据。
+            </p>
+            <div class="today-strip">
+              <span>4月22日 星期三</span>
+              <span>24 摄氏度 · 春秋</span>
+              <span>温柔 · 约会</span>
+            </div>
+            <div class="hero-actions">
+              <a class="ink-button" href="/app">体验今日行程</a>
+              <a class="line-button" href="/wardrobe">查看衣柜</a>
+              <a class="line-button" href="/journal">记录手记</a>
+            </div>
+          </div>
+
+          <div class="editorial-stack" aria-label="时尚图片叙事">
+            <div class="stack-controls" aria-label="切换时尚图片">
+              <button type="button" aria-label="上一张">‹</button>
+              <button type="button" aria-label="下一张">›</button>
+            </div>
+            <article
+              class="photo-panel is-prev"
+              style="--image: url('https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1400&q=88')"
+            >
+              <span>01</span>
+              <strong>Campus Ease</strong>
+              <small>校园松弛</small>
+            </article>
+            <article
+              class="photo-panel is-current"
+              style="--image: url('https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1400&q=88')"
+            >
+              <span>02</span>
+              <strong>City Soft Look</strong>
+              <small>轻盈通勤</small>
+            </article>
+            <article
+              class="photo-panel is-next"
+              style="--image: url('https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=1400&q=88')"
+            >
+              <span>03</span>
+              <strong>Date Mood</strong>
+              <small>温柔约会</small>
+            </article>
+            <template id="fallback-extra-slides">
+              <span
+                data-title="Coat Rhythm"
+                data-mood="利落通勤"
+                data-image="https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=1400&q=88"
+              ></span>
+              <span
+                data-title="Quiet Luxury"
+                data-mood="低调精致"
+                data-image="https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=1400&q=88"
+              ></span>
+              <span
+                data-title="Soft Street"
+                data-mood="日常轻街头"
+                data-image="https://images.unsplash.com/photo-1545291730-faff8ca1d4b0?auto=format&fit=crop&w=1400&q=88"
+              ></span>
+            </template>
+          </div>
+        </section>
+
+        <section class="story-scroll">
+          <article class="story-card">
+            <span>01</span>
+            <h2>天气不是参数，是穿搭的空气感。</h2>
+            <p>温度决定厚薄，天气决定材质，季节决定层次。系统先读懂今天，再开始搭配。</p>
+          </article>
+          <article class="story-card">
+            <span>02</span>
+            <h2>情绪让推荐更像人，而不是机器。</h2>
+            <p>一句话状态会转成推荐心情，和天气、场景、衣柜一起影响颜色和轮廓。</p>
+          </article>
+          <article class="story-card">
+            <span>03</span>
+            <h2>用户画像会持续学习。</h2>
+            <p>保存方案和行程手记会沉淀地点、天气、情绪、交通和负担点，让系统逐渐更懂你。</p>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script src="/fallback.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+.env
+node_modules/
+dist/
+data/
+*.log
+*-check.png
+.tmp-edge-review-profile/
+.tmp-edge-review-profile-2/
+review-*.png
