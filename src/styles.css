@@ -828,7 +828,8 @@ button {
 }
 
 .weather-panel,
-.ai-mood-box {
+.ai-mood-box,
+.ai-runtime-box {
   display: grid;
   gap: 12px;
   padding: 18px;
@@ -842,7 +843,9 @@ button {
 
 .weather-panel p,
 .weather-panel small,
-.ai-mood-box small {
+.ai-mood-box small,
+.ai-runtime-box small,
+.ai-runtime-copy {
   margin: 0;
   color: var(--muted);
   line-height: 1.7;
@@ -1082,7 +1085,8 @@ button {
 }
 
 .city-search input,
-.ai-mood-box textarea {
+.ai-mood-box textarea,
+.ai-runtime-box input {
   min-width: 0;
   border: 1px solid rgba(23, 17, 18, 0.1);
   border-radius: 18px;
@@ -1096,6 +1100,25 @@ button {
   min-height: 86px;
   resize: vertical;
   line-height: 1.6;
+}
+
+.ai-runtime-box label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ai-runtime-box input {
+  min-height: 44px;
+}
+
+.ai-runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 .city-search button,

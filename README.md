@@ -131,9 +131,9 @@ PORT=8787
 
 1. 构建命令：`npm install && npm run build`
 2. 启动命令：`npm start`
-3. 环境变量：`AI_BASE_URL`、`AI_API_KEY`、`AI_MODEL`
+3. 环境变量：`AI_BASE_URL`、`AI_MODEL`；`AI_API_KEY` 建议在 Render 控制台中手动添加
 4. 服务启动后即可获得 `onrender.com` 网址
-5. 项目根目录已提供 `render.yaml`，可直接作为 Render Blueprint 使用
+5. 项目根目录已提供 `render.yaml`，可直接作为 Render Blueprint 使用；默认不会把 `AI_API_KEY` 写进蓝图，便于你在上线后自行补充
 
 更完整的上线步骤见 [docs/部署上线说明.md](D:/desktop/codex/yuexing-weather-fashion-web/docs/部署上线说明.md)。
 
@@ -152,3 +152,11 @@ PORT=8787
 - 服务端请求体默认限制为 2.5MB；手记图片限制为 1.5MB，并落盘到 `/uploads/*`，不再直接以 base64 写入 SQLite。
 - 手记保存失败时，前端不再做本地兜底落库，避免出现前后端数据分叉。
 - 如需跨域调用，请在 `.env` 中配置 `CORS_ORIGINS`，多个 origin 用逗号分隔。
+
+## 2026-04-24 每用户模型配置补充
+
+- /app 页新增“我的模型设置”，每个登录用户都可以在前端填写自己的 Base URL、Model、API Key
+- 这套配置只保存在当前浏览器会话中，退出登录或手动清空后即失效，不写入数据库
+- 后端仅在当前请求里临时转发模型调用；/api/ai/*、POST /api/journal、GET /api/journal/summary 都支持读取这套请求级配置
+- 没有填写 API Key 时，系统继续使用本地智能 fallback，不依赖 Render 或服务端统一密钥
+- 如仍希望保留平台级模型，也可以继续配置 .env 中的 AI_BASE_URL、AI_API_KEY、AI_MODEL，它会作为请求级配置缺席时的兜底

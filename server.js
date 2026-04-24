@@ -15,6 +15,12 @@ const MAX_REQUEST_BYTES = 2.5 * 1024 * 1024;
 const MAX_UPLOAD_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'yx_session';
+const DEFAULT_AI_BASE_URL = 'https://api.deepseek.com/v1';
+const DEFAULT_AI_MODEL = 'deepseek-chat';
+const AI_PLACEHOLDER_KEYS = new Set([
+  'your_openai_compatible_key_here',
+  'your_deepseek_or_openai_compatible_key_here',
+]);
 const DEFAULT_ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:5173',
   'http://localhost:5173',
@@ -117,7 +123,7 @@ function applyCorsHeaders(req, res) {
   res.setHeader('access-control-allow-origin', origin);
   res.setHeader('access-control-allow-credentials', 'true');
   res.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type');
+  res.setHeader('access-control-allow-headers', 'content-type,x-ai-base-url,x-ai-model,x-ai-api-key');
   res.setHeader('vary', 'Origin');
 }
 
@@ -571,6 +577,52 @@ function persistJournalPhoto(photo) {
   return `/uploads/${filename}`;
 }
 
+function isPlaceholderAiKey(value) {
+  return !String(value || '').trim() || AI_PLACEHOLDER_KEYS.has(String(value || '').trim());
+}
+
+function normalizeAiBaseUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return DEFAULT_AI_BASE_URL;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw createError(400, '模型 Base URL 无效，请填写完整地址。');
+  }
+  const isLocalHttp = url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !isLocalHttp) {
+    throw createError(400, '模型 Base URL 仅支持 https，或 http://localhost 本地地址。');
+  }
+  return url.toString().replace(/\/$/, '');
+}
+
+function resolveAiRuntime(req) {
+  const requestBaseUrl = String(req.headers['x-ai-base-url'] || '').trim();
+  const requestModel = String(req.headers['x-ai-model'] || '').trim();
+  const requestApiKey = String(req.headers['x-ai-api-key'] || '').trim();
+  const hasRequestOverride = Boolean(requestBaseUrl || requestModel || requestApiKey);
+
+  if (hasRequestOverride) {
+    if (isPlaceholderAiKey(requestApiKey)) return null;
+    return {
+      source: 'request',
+      baseUrl: normalizeAiBaseUrl(requestBaseUrl || process.env.AI_BASE_URL || env.AI_BASE_URL || DEFAULT_AI_BASE_URL),
+      model: requestModel || process.env.AI_MODEL || env.AI_MODEL || DEFAULT_AI_MODEL,
+      apiKey: requestApiKey,
+    };
+  }
+
+  const envApiKey = String(process.env.AI_API_KEY || env.AI_API_KEY || '').trim();
+  if (isPlaceholderAiKey(envApiKey)) return null;
+  return {
+    source: 'server-env',
+    baseUrl: normalizeAiBaseUrl(process.env.AI_BASE_URL || env.AI_BASE_URL || DEFAULT_AI_BASE_URL),
+    model: process.env.AI_MODEL || env.AI_MODEL || DEFAULT_AI_MODEL,
+    apiKey: envApiKey,
+  };
+}
+
 function localMood(text = '') {
   const value = String(text).toLowerCase();
   if (/(累|疲|困|压力|低落|down|tired|stress)/i.test(value)) {
@@ -715,17 +767,17 @@ function localJournalSummary(entries, period, key) {
   };
 }
 
-async function analyzeJournal(payload) {
+async function analyzeJournal(payload, aiRuntime) {
   const local = localJournalAnalysis(payload);
   const system = '你是“悦行天气”的行程手记分析 AI。只输出 JSON，字段必须包含 tags, summary, emotionReview, nextSuggestion。中文表达，具体、温暖、适合真实用户阅读。';
   const ai = await callCompatibleLLM([
     { role: 'system', content: system },
     { role: 'user', content: JSON.stringify({ task: '分析用户出行手记，提取标签、情绪复盘和下次建议。', payload }) },
-  ]).catch(() => null);
+  ], aiRuntime).catch(() => null);
   return ai ? { ...local, ...ai, source: 'ai-online' } : local;
 }
 
-async function createJournal(payload, userId) {
+async function createJournal(payload, userId, aiRuntime) {
   const entry = {
     id: createId('journal'),
     user_id: userId,
@@ -742,7 +794,7 @@ async function createJournal(payload, userId) {
     visualTags: Array.isArray(payload.visualTags) ? payload.visualTags : [],
     created_at: new Date().toISOString(),
   };
-  const analysis = await analyzeJournal(entry);
+  const analysis = await analyzeJournal(entry, aiRuntime);
   db.prepare(`
     INSERT INTO journal_entries (
       id, user_id, title, place, trip_date, weather_snapshot, mood, scene, transport,
@@ -779,14 +831,14 @@ async function createJournal(payload, userId) {
   });
 }
 
-async function getJournalSummary(userId, period, key) {
+async function getJournalSummary(userId, period, key, aiRuntime) {
   const entries = filterEntriesByPeriod(getJournalEntries(userId), period, key);
   const local = localJournalSummary(entries, period, key);
   const system = '你是“悦行天气”的月度或年度出行总结 AI。只输出 JSON，字段必须包含 summary, suggestions。中文表达，像真实产品里的个性总结，不要夸张。';
   const ai = await callCompatibleLLM([
     { role: 'system', content: system },
     { role: 'user', content: JSON.stringify({ period, key, stats: local.stats, entries: entries.slice(0, 12) }) },
-  ]).catch(() => null);
+  ], aiRuntime).catch(() => null);
   const result = ai ? { ...local, ...ai, source: 'ai-online' } : { ...local, source: 'local-fallback' };
   db.prepare(`
     INSERT INTO journal_insights (id, user_id, period_type, period_key, stats_json, summary, suggestions, created_at)
@@ -806,24 +858,22 @@ async function getJournalSummary(userId, period, key) {
   return result;
 }
 
-async function callCompatibleLLM(messages) {
-  const baseUrl = process.env.AI_BASE_URL || env.AI_BASE_URL;
-  const apiKey = process.env.AI_API_KEY || env.AI_API_KEY;
-  const model = process.env.AI_MODEL || env.AI_MODEL || 'deepseek-chat';
-  const placeholderKeys = new Set([
-    'your_openai_compatible_key_here',
-    'your_deepseek_or_openai_compatible_key_here',
-  ]);
-  if (!baseUrl || !apiKey || placeholderKeys.has(apiKey)) return null;
+async function callCompatibleLLM(messages, aiRuntime) {
+  const runtime = aiRuntime || {
+    baseUrl: normalizeAiBaseUrl(process.env.AI_BASE_URL || env.AI_BASE_URL || DEFAULT_AI_BASE_URL),
+    apiKey: process.env.AI_API_KEY || env.AI_API_KEY,
+    model: process.env.AI_MODEL || env.AI_MODEL || DEFAULT_AI_MODEL,
+  };
+  if (!runtime.baseUrl || isPlaceholderAiKey(runtime.apiKey)) return null;
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const response = await fetch(`${runtime.baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
+      authorization: `Bearer ${runtime.apiKey}`,
     },
     body: JSON.stringify({
-      model,
+      model: runtime.model,
       temperature: 0.7,
       response_format: { type: 'json_object' },
       messages,
@@ -838,7 +888,7 @@ async function callCompatibleLLM(messages) {
   return content ? JSON.parse(content) : null;
 }
 
-async function recommend(payload) {
+async function recommend(payload, aiRuntime) {
   const system = '你是“悦行天气”的穿搭推荐 AI。只输出 JSON，不要 Markdown。字段必须包含 title, reason, sceneTips, weatherTips, tags, confidence。中文表达，具体、专业、自然。';
   const user = JSON.stringify({
     task: '基于规则筛选结果、真实天气、用户偏好和历史搭配，生成个性化穿搭理由和场景建议。',
@@ -847,17 +897,17 @@ async function recommend(payload) {
   const ai = await callCompatibleLLM([
     { role: 'system', content: system },
     { role: 'user', content: user },
-  ]).catch(() => null);
+  ], aiRuntime).catch(() => null);
   return ai ? { ...ai, source: 'ai-online' } : localRecommend(payload);
 }
 
-async function mood(payload) {
+async function mood(payload, aiRuntime) {
   const text = payload.text || '';
   const system = '你是情绪语义分类器。只输出 JSON，字段必须包含 mood, tags, explanation。mood 只能是 温柔、元气、松弛、专注 之一。';
   const ai = await callCompatibleLLM([
     { role: 'system', content: system },
     { role: 'user', content: `请分析这句话的穿搭情绪需求：${text}` },
-  ]).catch(() => null);
+  ], aiRuntime).catch(() => null);
   return ai ? { ...ai, source: 'ai-online' } : localMood(text);
 }
 
@@ -939,21 +989,27 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname.startsWith('/api/')) {
       if (req.method === 'GET' && url.pathname === '/api/health') {
-        return sendJson(res, 200, { ok: true, service: 'yuexing-weather', aiConfigured: Boolean((process.env.AI_API_KEY || env.AI_API_KEY) && !['your_openai_compatible_key_here', 'your_deepseek_or_openai_compatible_key_here'].includes(process.env.AI_API_KEY || env.AI_API_KEY)) });
+        return sendJson(res, 200, {
+          ok: true,
+          service: 'yuexing-weather',
+          aiConfigured: !isPlaceholderAiKey(process.env.AI_API_KEY || env.AI_API_KEY),
+          supportsUserManagedAi: true,
+        });
       }
       const session = requireSession(req);
+      const aiRuntime = resolveAiRuntime(req);
       if (req.method === 'POST' && url.pathname === '/api/ai/recommend') {
         const payload = await readJson(req);
-        return sendJson(res, 200, await recommend({ ...payload, user: session.user }));
+        return sendJson(res, 200, await recommend({ ...payload, user: session.user }, aiRuntime));
       }
       if (req.method === 'POST' && url.pathname === '/api/ai/mood') {
-        return sendJson(res, 200, await mood(await readJson(req)));
+        return sendJson(res, 200, await mood(await readJson(req), aiRuntime));
       }
       if (req.method === 'POST' && url.pathname === '/api/journal/analyze') {
-        return sendJson(res, 200, await analyzeJournal(await readJson(req)));
+        return sendJson(res, 200, await analyzeJournal(await readJson(req), aiRuntime));
       }
       if (req.method === 'POST' && url.pathname === '/api/journal') {
-        return sendJson(res, 200, await createJournal(await readJson(req), session.user.id));
+        return sendJson(res, 200, await createJournal(await readJson(req), session.user.id, aiRuntime));
       }
       if (req.method === 'GET' && url.pathname === '/api/journal') {
         return sendJson(res, 200, {
@@ -965,6 +1021,7 @@ const server = http.createServer(async (req, res) => {
           session.user.id,
           url.searchParams.get('period') || 'month',
           url.searchParams.get('key') || new Date().toISOString().slice(0, 7),
+          aiRuntime,
         ));
       }
       if (req.method === 'POST' && url.pathname === '/api/profile/rebuild') {

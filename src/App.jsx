@@ -51,6 +51,14 @@ const clientStorageKeys = {
   preferenceWeights: 'preference-weights',
   wardrobeVersion: 'wardrobe-version',
 };
+const clientSessionKeys = {
+  aiRuntime: 'ai-runtime',
+};
+const defaultAiRuntimeConfig = {
+  baseUrl: 'https://api.deepseek.com/v1',
+  model: 'deepseek-chat',
+  apiKey: '',
+};
 
 const slides = [
   {
@@ -313,8 +321,25 @@ function saveStored(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function readSessionStored(key, fallback) {
+  try {
+    const value = sessionStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSessionStored(key, value) {
+  sessionStorage.setItem(key, JSON.stringify(value));
+}
+
 function removeStored(key) {
   localStorage.removeItem(key);
+}
+
+function removeSessionStored(key) {
+  sessionStorage.removeItem(key);
 }
 
 function buildScopedStorageKey(scope, key) {
@@ -333,11 +358,44 @@ function saveScopedStored(scope, key, value) {
   saveStored(buildScopedStorageKey(scope, key), value);
 }
 
+function readScopedSessionStored(scope, key, fallback) {
+  return readSessionStored(buildScopedStorageKey(scope, key), fallback);
+}
+
+function saveScopedSessionStored(scope, key, value) {
+  saveSessionStored(buildScopedStorageKey(scope, key), value);
+}
+
+function removeScopedSessionStored(scope, key) {
+  removeSessionStored(buildScopedStorageKey(scope, key));
+}
+
 function validateImageFile(file) {
   if (!file) return '请选择图片文件。';
   if (!String(file.type || '').startsWith('image/')) return '只支持图片文件。';
   if (file.size > MAX_CLIENT_IMAGE_BYTES) return '图片请控制在 1.5MB 以内。';
   return '';
+}
+
+function sanitizeAiRuntimeConfig(config = {}) {
+  return {
+    baseUrl: String(config.baseUrl || '').trim() || defaultAiRuntimeConfig.baseUrl,
+    model: String(config.model || '').trim() || defaultAiRuntimeConfig.model,
+    apiKey: String(config.apiKey || '').trim(),
+  };
+}
+
+function hasAiRuntimeSecret(config = {}) {
+  return Boolean(String(config.apiKey || '').trim());
+}
+
+function buildAiRuntimeHeaders(config = {}) {
+  const runtime = sanitizeAiRuntimeConfig(config);
+  return {
+    'x-ai-base-url': runtime.baseUrl,
+    'x-ai-model': runtime.model,
+    'x-ai-api-key': runtime.apiKey,
+  };
 }
 
 async function apiRequest(url, options = {}) {
@@ -782,6 +840,7 @@ function App() {
   const [journalEntries, setJournalEntries] = useState([]);
   const [weatherLocation, setWeatherLocation] = useState(null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
+  const [aiRuntimeConfig, setAiRuntimeConfig] = useState(defaultAiRuntimeConfig);
   const [transition, setTransition] = useState({
     active: false,
     phase: '',
@@ -834,6 +893,7 @@ function App() {
     setLookHistory(readScopedStored(storageScope, clientStorageKeys.lookHistory, []));
     setWeatherLocation(readScopedStored(storageScope, clientStorageKeys.weatherLocation, null));
     setAiRecommendation(readScopedStored(storageScope, clientStorageKeys.aiRecommendation, null));
+    setAiRuntimeConfig(sanitizeAiRuntimeConfig(readScopedSessionStored(storageScope, clientSessionKeys.aiRuntime, defaultAiRuntimeConfig)));
     if (!isAuthenticated) setJournalEntries([]);
     setStorageReady(true);
   }, [sessionReady, storageScope, isAuthenticated]);
@@ -862,6 +922,10 @@ function App() {
     if (!storageReady) return;
     saveScopedStored(storageScope, clientStorageKeys.aiRecommendation, aiRecommendation);
   }, [aiRecommendation, storageReady, storageScope]);
+  useEffect(() => {
+    if (!storageReady) return;
+    saveScopedSessionStored(storageScope, clientSessionKeys.aiRuntime, sanitizeAiRuntimeConfig(aiRuntimeConfig));
+  }, [aiRuntimeConfig, storageReady, storageScope]);
 
   const preferenceWeights = useMemo(
     () => computePreferenceWeights(lookHistory, tasteTags),
@@ -874,8 +938,19 @@ function App() {
   }, [preferenceWeights, storageReady, storageScope]);
 
   const requestApi = async (url, options = {}) => {
+    const { headers = {}, ...rest } = options;
+    const method = String(rest.method || 'GET').toUpperCase();
+    const shouldAttachAiHeaders = hasAiRuntimeSecret(aiRuntimeConfig) && (
+      url.startsWith('/api/ai/')
+      || url.startsWith('/api/journal/summary')
+      || url.startsWith('/api/journal/analyze')
+      || (url === '/api/journal' && method === 'POST')
+    );
     try {
-      return await apiRequest(url, options);
+      return await apiRequest(url, {
+        ...rest,
+        headers: shouldAttachAiHeaders ? { ...headers, ...buildAiRuntimeHeaders(aiRuntimeConfig) } : headers,
+      });
     } catch (error) {
       if (error.status === 401) {
         setSession(null);
@@ -982,6 +1057,7 @@ function App() {
   };
 
   const logout = () => {
+    removeScopedSessionStored(storageScope, clientSessionKeys.aiRuntime);
     apiRequest('/api/auth/logout', {
       method: 'POST',
     }).catch(() => {});
@@ -991,6 +1067,11 @@ function App() {
     setJournalEntries([]);
     setLoginRedirect('/app');
     goTo('/login', { replace: true });
+  };
+
+  const clearAiRuntimeConfig = () => {
+    removeScopedSessionStored(storageScope, clientSessionKeys.aiRuntime);
+    setAiRuntimeConfig(defaultAiRuntimeConfig);
   };
 
   const saveLook = (look) => {
@@ -1082,6 +1163,9 @@ function App() {
             saveLook={saveLook}
             aiRecommendation={aiRecommendation}
             setAiRecommendation={setAiRecommendation}
+            aiRuntimeConfig={aiRuntimeConfig}
+            setAiRuntimeConfig={setAiRuntimeConfig}
+            clearAiRuntimeConfig={clearAiRuntimeConfig}
             weatherLocation={weatherLocation}
             setWeatherLocation={setWeatherLocation}
             requestApi={requestApi}
@@ -1094,6 +1178,7 @@ function App() {
             conditions={conditions}
             journalEntries={journalEntries}
             setJournalEntries={setJournalEntries}
+            aiRuntimeSignature={`${sanitizeAiRuntimeConfig(aiRuntimeConfig).baseUrl}|${sanitizeAiRuntimeConfig(aiRuntimeConfig).model}|${hasAiRuntimeSecret(aiRuntimeConfig) ? 'on' : 'off'}`}
             requestApi={requestApi}
           />
         )}
@@ -1421,6 +1506,9 @@ function RecommendPage({
   saveLook,
   aiRecommendation,
   setAiRecommendation,
+  aiRuntimeConfig,
+  setAiRuntimeConfig,
+  clearAiRuntimeConfig,
   weatherLocation,
   setWeatherLocation,
   requestApi,
@@ -1441,6 +1529,8 @@ function RecommendPage({
     () => buildTripPlan({ ...conditions, departureTime, duration }, look, journalProfile),
     [conditions, departureTime, duration, look, journalProfile],
   );
+  const runtime = sanitizeAiRuntimeConfig(aiRuntimeConfig);
+  const aiRuntimeEnabled = hasAiRuntimeSecret(runtime);
 
   const setCondition = (key, value) => {
     setConditions((current) => ({
@@ -1856,6 +1946,47 @@ function RecommendPage({
             </button>
             {aiRecommendation?.moodInsight && <small>{aiRecommendation.moodInsight}</small>}
           </div>
+          <div className="ai-runtime-box">
+            <div className="condition-title">
+              <Sparkles size={18} />
+              <strong>我的模型设置</strong>
+            </div>
+            <p className="ai-runtime-copy">
+              这里的 API Key 只保存在当前浏览器会话里，请求时由后端临时转发，不会写入数据库。
+            </p>
+            <label>
+              Base URL
+              <input
+                value={runtime.baseUrl}
+                onChange={(event) => setAiRuntimeConfig((current) => ({ ...current, baseUrl: event.target.value }))}
+                placeholder="https://api.deepseek.com/v1"
+              />
+            </label>
+            <label>
+              Model
+              <input
+                value={runtime.model}
+                onChange={(event) => setAiRuntimeConfig((current) => ({ ...current, model: event.target.value }))}
+                placeholder="deepseek-chat"
+              />
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                value={runtime.apiKey}
+                onChange={(event) => setAiRuntimeConfig((current) => ({ ...current, apiKey: event.target.value }))}
+                placeholder="sk-..."
+                autoComplete="off"
+              />
+            </label>
+            <div className="ai-runtime-actions">
+              <button className="line-button" type="button" onClick={clearAiRuntimeConfig}>
+                清空本次会话密钥
+              </button>
+              <small>{aiRuntimeEnabled ? `当前将使用 ${runtime.model}` : '未填写密钥时，AI 功能会自动回退到本地智能。'}</small>
+            </div>
+          </div>
         </div>
         <article className="look-result">
           <div className="ai-status-row">
@@ -2152,7 +2283,7 @@ function WardrobePage({ garments, setGarments }) {
   );
 }
 
-function JournalPage({ user, conditions, journalEntries, setJournalEntries, requestApi }) {
+function JournalPage({ user, conditions, journalEntries, setJournalEntries, aiRuntimeSignature, requestApi }) {
   const [activeView, setActiveView] = useState('entries');
   const [status, setStatus] = useState('');
   const [summaryState, setSummaryState] = useState('');
@@ -2201,7 +2332,7 @@ function JournalPage({ user, conditions, journalEntries, setJournalEntries, requ
     return () => {
       cancelled = true;
     };
-  }, [journalEntries.length, monthKey, yearKey]);
+  }, [journalEntries.length, monthKey, yearKey, aiRuntimeSignature]);
 
   const readPhoto = (event) => {
     const file = event.target.files?.[0];
